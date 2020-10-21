@@ -142,23 +142,26 @@ void onMqttDisconnect(AsyncMqttClientDisconnectReason reason) {
 }
 
 void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total) {
-  Serial.println("New message: \"" + String(payload) + "\" in topic: " + String(topic));
-  if (String(topic).substring(0, 21) == setStateTopic) {
-    if (String(payload).substring(0, 1) == "1") {
+  String mess = String(payload).substring(0, len);
+
+  Serial.println("New message: \"" + mess + "\" in topic: " + String(topic));
+
+  if (String(topic).substring(0, strlen(setStateTopic)) == setStateTopic) {
+    if (mess == "1") {
       Serial.println("RELAY: ON");
       digitalWrite(RELAY, HIGH);
       mqttClient.publish(stateTopic, 1, true, "1");
-    } else if (String(payload).substring(0, 1) == "0") {
+    } else if (mess == "0") {
       Serial.println("RELAY: OFF");
       digitalWrite(RELAY, LOW);
       mqttClient.publish(stateTopic, 1, true, "0");
     }
-  } else if(String(topic).substring(0, 16) == bootTopic) {
-    if (String(payload).substring(0, 1) == "1") {
+  } else if(String(topic).substring(0, strlen(bootTopic)) == bootTopic) {
+    if (mess == "1") {
       Serial.println("BOOT: ON");
       mqttClient.publish(ipTopic, 1, true, WiFi.localIP().toString().c_str());
       bootMode = true;
-    } else if (String(payload).substring(0, 1) == "0") {
+    } else if (mess == "0") {
       Serial.println("BOOT: OFF");
       bootMode = false;
     }
