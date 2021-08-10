@@ -1,7 +1,7 @@
  /*
 |-------------------------------------------|
             -|By serega404|-
-              EasyESPRelay
+               SmartRelay
 |-------------------------------------------|
 */
 
@@ -30,7 +30,7 @@
 
 // 0 - off | 1 - on
 const bool defaultState = 1; // if wifi or mqtt is not available then the relay will be automatically turned on or off
-const int reconnectTime = 10;
+const short reconnectTime = 10;
 
 // MQTT Topics
 const char* ipTopic = "dvor/light1/ip"; // this topic will return the ip address after entering the boot mode
@@ -49,6 +49,10 @@ Ticker reconnectTimer;
 
 ESP8266WebServer HttpServer(SERVERPORT);
 ESP8266HTTPUpdateServer httpUpdater;
+
+WiFiEventHandler wifiConnectHandler;
+WiFiEventHandler wifiDisconnectHandler;
+Ticker wifiReconnectTimer;
 //------Initialization------
 
 void setup() 
@@ -60,6 +64,11 @@ void setup()
     Serial.begin(9600);
 
   Serial.println();
+
+  wifiDisconnectHandler = WiFi.onStationModeDisconnected(onWifiDisconnect);
+  wifiConnectHandler = WiFi.onStationModeGotIP(onWifiConnect);
+  
+  wifiConnect();
   
   mqttClient.onConnect(onMqttConnect);
   mqttClient.onDisconnect(onMqttDisconnect);
@@ -70,12 +79,11 @@ void setup()
   httpUpdater.setup(&HttpServer, OTAPATH, OTAUSER, OTAPASSWORD);
   HttpServer.onNotFound(handleNotFound);
   HttpServer.begin();
-  
-  wifiConnect();
-  
+
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("Couldn't connect to Wi Fi!");
     defaultState ? digitalWrite(RELAY, HIGH) : digitalWrite(RELAY, LOW);
+    wifiReconnectTimer.attach(300, reconnectToWifi); 
   } else if (WiFi.status() == WL_CONNECTED && !mqttClient.connected()) {
     Serial.println("Connecting to MQTT...");
     mqttClient.connect();
@@ -89,24 +97,47 @@ void loop()
   }
 }
 
+//---------WIFI---------
+void onWifiDisconnect(const WiFiEventStationModeDisconnected& event) {
+  Serial.println(F("Disconnected from Wi-Fi."));
+  #ifdef USE_MQTT
+    mqttReconnectTimer.detach(); // ensure we don't reconnect to MQTT while reconnecting to Wi-Fi
+  #endif
+  wifiReconnectTimer.once(2, reconnectToWifi);
+}
+
+void onWifiConnect(const WiFiEventStationModeGotIP& event) {
+  wifiReconnectTimer.detach();
+  Serial.println(F("Connected to Wi-Fi."));
+  #ifdef USE_MQTT
+    connectToMqtt();
+  #endif
+}
+
+void reconnectToWifi() {
+  Serial.println("Reconnecting to Wi-Fi...");
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+}
+
 void wifiConnect() {
     unsigned long ConnectStart = millis();
     WiFi.mode(WIFI_STA);
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD); 
   
-    Serial.print("Connecting to Wi-Fi");
+    Serial.print(F("Connecting to Wi-Fi"));
     
     while (millis() - ConnectStart < 10000 && WiFi.status() != WL_CONNECTED) {
       delay(500);
-      Serial.print(".");
+      Serial.print(F("."));
     } 
     Serial.println();
     if (WiFi.status() == WL_CONNECTED) {
-      Serial.println("WiFi connected");
-      Serial.print("IP address: ");
+      Serial.println(F("WiFi connected"));
+      Serial.print(F("IP address: "));
       Serial.println(WiFi.localIP());
     }
 }
+//---------WIFI---------
 
 void reconnectFunc() {
   Serial.println("Reconnect...");
@@ -146,7 +177,7 @@ void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties 
 
   Serial.println("New message: \"" + mess + "\" in topic: " + String(topic));
 
-  if (String(topic).substring(0, strlen(setStateTopic)) == setStateTopic) {
+  if (String(topic) == setStateTopic) {
     if (mess == "1") {
       Serial.println("RELAY: ON");
       digitalWrite(RELAY, HIGH);
@@ -156,7 +187,7 @@ void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties 
       digitalWrite(RELAY, LOW);
       mqttClient.publish(stateTopic, 1, true, "0");
     }
-  } else if(String(topic).substring(0, strlen(bootTopic)) == bootTopic) {
+  } else if(String(topic) == bootTopic) {
     if (mess == "1") {
       Serial.println("BOOT: ON");
       mqttClient.publish(ipTopic, 1, true, WiFi.localIP().toString().c_str());
